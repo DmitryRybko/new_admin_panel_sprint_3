@@ -1,0 +1,1 @@
+*/1 * * * * python3 etl_process.py >> /logfile.txt
