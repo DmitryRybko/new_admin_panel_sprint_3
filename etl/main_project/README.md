@@ -57,6 +57,3 @@ https://code.s3.yandex.net/middle-python/learning-materials/ETLTests-2.json
 (4) Kibana:
 
 - состояние индекса: http://localhost:5601/app/kibana#/management/elasticsearch/index_management/indices?_g=()
-
-(5) ETL:
-
