@@ -1,20 +1,100 @@
+import abc
 import backoff
 import psycopg2
 import requests
+import time
 import json
+import logging
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
 from elasticsearch.exceptions import ConnectionError
 from es_schema import es_schema
+from json import JSONDecodeError
 from datetime import datetime
-from settings import dsn_settings, load_size, ES_HOST, ES_PORT, starting_time
+from settings import settings, dsn_settings
+from typing import Any, Optional
+from pathlib import Path
+
+
+class BaseStorage:
+    @abc.abstractmethod
+    def save_state(self, state: dict) -> None:
+        """Сохранить состояние в постоянное хранилище"""
+        pass
+
+    @abc.abstractmethod
+    def retrieve_state(self) -> dict:
+        """Загрузить состояние локально из постоянного хранилища"""
+        pass
+
+
+class JsonFileStorage(BaseStorage):
+    def __init__(self, file_path: Optional[str] = None):
+        self.file_path = file_path
+        file_path_obj = Path(self.file_path)
+        if not file_path_obj.exists():
+            with open(self.file_path, 'w') as creating_new_csv_file:
+                pass
+        if not type(self.file_path) == str:
+            self.file_path = None
+
+    def save_state(self, state: dict) -> None:
+        """Сохранить состояние в постоянное хранилище"""
+
+        if self.file_path is not None:
+            try:
+                with open(self.file_path, 'w') as storage_file:
+                    json.dump(state, storage_file)
+                    print(f"файл {self.file_path} сохранен")
+            except JSONDecodeError:
+                return None
+
+        return None
+
+    def retrieve_state(self) -> dict:
+        """Загрузить состояние локально из постоянного хранилища"""
+        if self.file_path is None:
+            print("file_path не указан")
+            data = {}
+            return data
+
+        else:
+            with open(self.file_path) as storage_file:
+                try:
+                    data = json.load(storage_file)
+                    return data
+                except JSONDecodeError:
+                    data = {}
+                    return data
+
+
+class State:
+    """
+    Класс для хранения состояния при работе с данными, чтобы постоянно не перечитывать данные с начала.
+    Здесь представлена реализация с сохранением состояния в файл.
+    """
+
+    def __init__(self, storage: JsonFileStorage):
+        self.storage = storage
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Установить состояние для определённого ключа"""
+        current_state = self.storage.retrieve_state()
+        current_state[key] = value
+        self.storage.save_state(current_state)
+        return None
+
+    def get_state(self, key: str) -> Any:
+        """Получить состояние по определённому ключу"""
+        key_state = self.storage.retrieve_state().get(key)
+        return key_state
 
 
 def backoff_hdlr(details):
     """"
     Функция, которая принимает от @backoff словарь details с информацией о статусе процесса backoff.
     """
-    print("Backing off {wait:0.1f} seconds after {tries} tries calling function {target}".format(**details))
+    logging.info("Backing off {wait:0.1f} seconds after {tries} tries calling function {target}".format(**details))
 
 
 @backoff.on_exception(backoff.expo, psycopg2.OperationalError, max_time=60, max_tries=8, on_backoff=backoff_hdlr)
@@ -33,12 +113,8 @@ def extract_from_pg(dsn: dict, chunk_size: int):
     """
     with psycopg2.connect(**dsn) as conn, conn.cursor() as cursor:
         current_table = "film_work"
-        cursor.execute(f'SELECT COUNT(*) FROM {current_table}')
-        records_qty = cursor.fetchone()[0]
-        chunks_qty = -(-records_qty//chunk_size)
 
-        with open("state_file.txt", 'r') as state_file:
-            status_time = str(state_file.readline())
+        status_time = current_state.get_state("status_time")
 
         cursor.execute('''
                     SELECT
@@ -65,16 +141,15 @@ def extract_from_pg(dsn: dict, chunk_size: int):
                     WHERE fw.modified > (%s)
                     GROUP BY fw.id
                     ORDER BY fw.modified
+                    LIMIT 100;
                     ''', (status_time,))
 
-        for chunk_no in range(chunks_qty):
-            current_chunk = cursor.fetchmany(chunk_size)
-            data_for_es = transform_data(current_chunk)
-            load_data_to_es(data_for_es)
-
-    with open("state_file.txt", 'w') as state_file:
-        current_time = str(datetime.now())
-        state_file.write(current_time)
+        current_chunk = cursor.fetchall()
+        if current_chunk == ():
+            current_state.set_state("status_time", str(datetime.now()))
+            return None
+        else:
+            return current_chunk
 
 
 def transform_data(chunk: dict):
@@ -110,7 +185,7 @@ def process_persons(persons_data):
     Функция трансформирует данные по persons в соответствии с описанием индекса для Elasticsearch (es_schema.py).
     """
     persons_dict = {}
-    roles = ["actor", "director", "writer"]
+    roles = ("actor", "director", "writer")
     for role in roles:
         role_dict = [{"id": item["id"], "name": item["name"]} for item in persons_data if item["person_role"] == role]
         persons_dict[f'{role}s'] = role_dict
@@ -131,16 +206,15 @@ def create_es_index(data_scheme):
     :return:
     """
 
-    url = f'http://{ES_HOST}:{ES_PORT}/movies'
+    url = f'http://{settings.ES_HOST}:{settings.ES_PORT}/movies'
     payload = json.dumps(data_scheme)
     headers = {'Content-Type': 'application/json'}
     requests.put(url, headers=headers, data=payload)
 
-    try:
-        with open("state_file.txt", 'x') as state_file:
-            state_file.write(starting_time)
-    except FileExistsError:
-        pass
+    if current_state.get_state("status_time"):
+        return None
+    else:
+        current_state.set_state("status_time", settings.STARTING_TIME)
 
 
 @backoff.on_exception(backoff.expo, ConnectionError, max_time=60, max_tries=8, on_backoff=backoff_hdlr)
@@ -152,14 +226,21 @@ def load_data_to_es(doc):
     :param doc: генератор документов для загрузки в Elasticsearch
     :return:
     """
-    es_client = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
+    es_client = Elasticsearch(f"http://{settings.ES_HOST}:{settings.ES_PORT}")
     helpers.bulk(es_client, doc)
 
 
 if __name__ == '__main__':
 
-    index_name = "movies"
+    logging.basicConfig(level=logging.INFO)
+    state_storage = JsonFileStorage(settings.STATE_STORAGE_FILE)
+    current_state = State(state_storage)
+    index_name = settings.INDEX_NAME
     create_es_index(es_schema)
-    movies_data = extract_from_pg(dsn_settings, load_size)
 
+    while True:
+        movies_data = extract_from_pg(dsn_settings, settings.LOAD_SIZE)
+        data_for_es = transform_data(movies_data)
+        load_data_to_es(data_for_es)
+        time.sleep(20)
 

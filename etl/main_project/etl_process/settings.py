@@ -1,19 +1,34 @@
-import os
+from pydantic import BaseSettings
 from dotenv import load_dotenv
 
+# load_dotenv здесь нужен несмотря на наличие pydantic, так как pydantic не умеет искать env в parent директориях
 load_dotenv()
 
-DB_NAME = os.environ.get("DB_NAME")
-USER = os.environ.get("DB_USER")
-PASSWORD = os.environ.get("DB_PASSWORD")
-HOST = os.environ.get("DB_HOST", 'localhost')
-PORT = os.environ.get("DB_PORT", 54321)
-DSN_OPTIONS = '-c search_path=content'
 
-ES_HOST = os.environ.get("ES_HOST", 'localhost')
-ES_PORT = os.environ.get("ES_PORT", 9200)
+class Settings(BaseSettings):
+    DB_NAME: str = "movies_database1"
+    DB_USER: str = "some_user"
+    DB_PASSWORD: str = "some_password"
+    SECRET_KEY: str = "some_secret_key"
+    DSN_OPTIONS = '-c search_path=content'
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 54321
 
-dsn_settings: dict = dict(dbname=DB_NAME, user=USER, password=PASSWORD, host=HOST, port=PORT, options=DSN_OPTIONS)
-load_size = 50
+    ES_HOST: str = "localhost"
+    ES_PORT: int = "9200"
+    INDEX_NAME: str = "movies"
 
-starting_time = os.environ.get('STARTING_TIME', '2021-06-16 23:14:09.200 +0300')
+    STARTING_TIME: str = "2021-06-16 23:14:09.200 +0300"
+    LOAD_SIZE: int = 50
+
+    STATE_STORAGE_FILE: str = "state_file.txt"
+
+    class Config:
+        case_sensitive = False
+        env_file = '.env'
+        env_file_encoding = 'utf-8'
+
+
+settings = Settings()
+dsn_settings: dict = dict(dbname=settings.DB_NAME, user=settings.DB_USER, password=settings.DB_PASSWORD,
+                          host=settings.DB_HOST, port=settings.DB_PORT, options=settings.DSN_OPTIONS)
