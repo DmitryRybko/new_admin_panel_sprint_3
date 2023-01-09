@@ -42,7 +42,6 @@ class JsonFileStorage(BaseStorage):
     def retrieve_state(self) -> dict:
         """Загрузить состояние локально из постоянного хранилища"""
         if self.file_path is None:
-            print("file_path не указан")
             data = {}
             return data
 
