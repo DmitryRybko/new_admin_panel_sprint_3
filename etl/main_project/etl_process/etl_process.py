@@ -9,85 +9,10 @@ from elasticsearch import Elasticsearch
 from elasticsearch import helpers
 from elasticsearch.exceptions import ConnectionError
 from es_schema import es_schema
-from json import JSONDecodeError
+
 from datetime import datetime
 from settings import settings, dsn_settings
-from typing import Any, Optional
-from pathlib import Path
-
-
-class BaseStorage:
-    @abc.abstractmethod
-    def save_state(self, state: dict) -> None:
-        """Сохранить состояние в постоянное хранилище"""
-        pass
-
-    @abc.abstractmethod
-    def retrieve_state(self) -> dict:
-        """Загрузить состояние локально из постоянного хранилища"""
-        pass
-
-
-class JsonFileStorage(BaseStorage):
-    def __init__(self, file_path: Optional[str] = None):
-        self.file_path = file_path
-        file_path_obj = Path(self.file_path)
-        if not file_path_obj.exists():
-            with open(self.file_path, 'w') as creating_new_csv_file:
-                pass
-        if not type(self.file_path) == str:
-            self.file_path = None
-
-    def save_state(self, state: dict) -> None:
-        """Сохранить состояние в постоянное хранилище"""
-
-        if self.file_path is not None:
-            try:
-                with open(self.file_path, 'w') as storage_file:
-                    json.dump(state, storage_file)
-                    print(f"файл {self.file_path} сохранен")
-            except JSONDecodeError:
-                return None
-
-        return None
-
-    def retrieve_state(self) -> dict:
-        """Загрузить состояние локально из постоянного хранилища"""
-        if self.file_path is None:
-            print("file_path не указан")
-            data = {}
-            return data
-
-        else:
-            with open(self.file_path) as storage_file:
-                try:
-                    data = json.load(storage_file)
-                    return data
-                except JSONDecodeError:
-                    data = {}
-                    return data
-
-
-class State:
-    """
-    Класс для хранения состояния при работе с данными, чтобы постоянно не перечитывать данные с начала.
-    Здесь представлена реализация с сохранением состояния в файл.
-    """
-
-    def __init__(self, storage: JsonFileStorage):
-        self.storage = storage
-
-    def set_state(self, key: str, value: Any) -> None:
-        """Установить состояние для определённого ключа"""
-        current_state = self.storage.retrieve_state()
-        current_state[key] = value
-        self.storage.save_state(current_state)
-        return None
-
-    def get_state(self, key: str) -> Any:
-        """Получить состояние по определённому ключу"""
-        key_state = self.storage.retrieve_state().get(key)
-        return key_state
+from state_processing import JsonFileStorage, State
 
 
 def backoff_hdlr(details):
@@ -242,5 +167,5 @@ if __name__ == '__main__':
         movies_data = extract_from_pg(dsn_settings, settings.LOAD_SIZE)
         data_for_es = transform_data(movies_data)
         load_data_to_es(data_for_es)
-        time.sleep(20)
+        time.sleep(settings.ETL_SLEEP_TIME)
 

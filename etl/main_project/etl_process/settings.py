@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     STATE_STORAGE_FILE: str = "state_file.txt"
 
+    ETL_SLEEP_TIME: int = 20
+
     class Config:
         case_sensitive = False
         env_file = '.env'
