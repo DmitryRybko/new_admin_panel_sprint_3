@@ -1,4 +1,3 @@
-import abc
 import backoff
 import psycopg2
 import requests

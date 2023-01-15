@@ -71,6 +71,22 @@ services:
     depends_on:
       - elasticsearch
       - db
+
+  redis:
+    image: redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  fastapi:
+    build:
+      context: ./../../../Async_API_sprint_1/fastapi-solution
+    env_file: ./.env
+    depends_on:
+      - "redis"
+    ports:
+      - "8001:8001"
+
 volumes:
   postgres_data:
   static_data:
