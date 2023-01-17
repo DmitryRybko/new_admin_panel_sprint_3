@@ -6,7 +6,7 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    DB_NAME: str = "movies_database1"
+    DB_NAME: str = "movies_database"
     DB_USER: str = "some_user"
     DB_PASSWORD: str = "some_password"
     SECRET_KEY: str = "some_secret_key"
@@ -16,14 +16,14 @@ class Settings(BaseSettings):
 
     ES_HOST: str = "localhost"
     ES_PORT: int = "9200"
-    INDEX_NAME: str = "movies"
+    INDEX_NAME: str = "film_work"
+    INDEX_NAME_GENRE: str = "genres"
 
-    STARTING_TIME: str = "2021-06-16 23:14:09.200 +0300"
-    LOAD_SIZE: int = 50
+    STARTING_TIME: str = "2000-06-16 23:14:09.200 +0300"
 
     STATE_STORAGE_FILE: str = "state_file.txt"
 
-    ETL_SLEEP_TIME: int = 20
+    ETL_SLEEP_TIME: int = 10
 
     class Config:
         case_sensitive = False

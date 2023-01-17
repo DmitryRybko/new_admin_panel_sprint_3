@@ -5,4 +5,4 @@ COPY . .
 RUN pip install -r requirements.txt
 RUN crontab crontab
 RUN touch logfile.txt
-CMD ["cron", "-f"]
+CMD ["python3", "etl_process.py"]
