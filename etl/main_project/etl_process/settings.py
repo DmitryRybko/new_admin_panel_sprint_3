@@ -11,11 +11,13 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "some_password"
     SECRET_KEY: str = "some_secret_key"
     DSN_OPTIONS = '-c search_path=content'
+
     DB_HOST: str = "localhost"
     DB_PORT: int = 54321
 
     ES_HOST: str = "localhost"
     ES_PORT: int = "9200"
+
     INDEX_NAME: str = "film_work"
     INDEX_NAME_GENRE: str = "genres"
 

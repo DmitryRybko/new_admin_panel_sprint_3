@@ -11,6 +11,7 @@ from es_schema_genres import es_schema_genres
 from datetime import datetime
 from settings import settings, dsn_settings
 from state_processing import JsonFileStorage, State
+from pprint import pprint
 
 
 def backoff_hdlr(details: dict):
@@ -38,13 +39,14 @@ def extract_from_pg(dsn: dict, used_table: str):
     with psycopg2.connect(**dsn) as conn, conn.cursor() as cursor:
 
         if current_table == settings.INDEX_NAME:
-            status_time = datetime.strptime(current_state.get_state("status_time_filmwork"), "%Y-%m-%d %H:%M:%S.%f %z")
+            status_time = current_state.get_state("status_time_filmwork")
             cursor.execute('''
                         SELECT
                            fw.id,
                            fw.title,
                            fw.description,
                            fw.rating,
+                           fw.modified,
                            COALESCE (
                                json_agg(
                                    DISTINCT jsonb_build_object(
@@ -61,13 +63,16 @@ def extract_from_pg(dsn: dict, used_table: str):
                         LEFT JOIN content.person p ON p.id = pfw.person_id
                         LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
                         LEFT JOIN content.genre g ON g.id = gfw.genre_id
-                        WHERE fw.modified > (%s)
+                        WHERE fw.modified >= (%s)
                         GROUP BY fw.id
                         ORDER BY fw.modified
-                        LIMIT 100;
+                        LIMIT 50;
                         ''', (status_time,))
 
             current_chunk = cursor.fetchall()
+            current_status_time = current_chunk[-1][4]
+            pprint(str(current_status_time))
+            current_state.set_state("status_time_filmwork", str(current_status_time))
             if current_chunk == ():
                 current_state.set_state("status_time_filmwork", str(datetime.now()))
                 return None
@@ -110,9 +115,8 @@ def transform_data(chunk: dict, table: str):
                 persons_dict[f'{role}s'] = role_dict
             return persons_dict
 
-        records = chunk
-        for record in records:
-            persons_dict = process_persons(record[4])
+        for record in chunk:
+            persons_dict = process_persons(record[5])
             doc = {
                 "_index": current_table,
                 "_id": record[0],
@@ -124,15 +128,14 @@ def transform_data(chunk: dict, table: str):
                     "actors": persons_dict["actors"],
                     "director": str(persons_dict.get("directors")),
                     "writers": persons_dict["writers"],
-                    "genre": record[5],
+                    "genre": record[6],
                 }
             }
             yield doc
 
     elif current_table == settings.INDEX_NAME_GENRE:
 
-        records = chunk
-        for record in records:
+        for record in chunk:
             doc = {
                 "_index": current_table,
                 "_id": record[0],
