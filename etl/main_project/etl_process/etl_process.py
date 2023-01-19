@@ -4,151 +4,190 @@ import requests
 import time
 import json
 import logging
-from elasticsearch import Elasticsearch
-from elasticsearch import helpers
+from elasticsearch import Elasticsearch, helpers
 from elasticsearch.exceptions import ConnectionError
 from es_schema import es_schema
-
+from es_schema_genres import es_schema_genres
 from datetime import datetime
 from settings import settings, dsn_settings
 from state_processing import JsonFileStorage, State
+from pprint import pprint
 
 
-def backoff_hdlr(details):
+def backoff_hdlr(details: dict):
     """"
-    Функция, которая принимает от @backoff словарь details с информацией о статусе процесса backoff.
+    Accepts a dictionary with info on backoff process status from @backoff.
     """
     logging.info("Backing off {wait:0.1f} seconds after {tries} tries calling function {target}".format(**details))
 
 
 @backoff.on_exception(backoff.expo, psycopg2.OperationalError, max_time=60, max_tries=8, on_backoff=backoff_hdlr)
-def extract_from_pg(dsn: dict, chunk_size: int):
+def extract_from_pg(dsn: dict, used_table: str):
     """
-    Функция осуществляет соединение с PostgresDB, считывает данные пачками, инициирует их трансформацию в формат для
-    Elasticsearch и инициирует загрузку каждой пачки в Elasticsearch. Время последней успешной загрузки в Elasticsearch
-    сохраняется во внешнем файле (status_file.txt). При следующем запуске функция выгружает пачки записей со временем
-    модификации позже ранее сохраненного. В случае потери связи с Postgres декоратор backoff перехватывает
-    ошибку соединения и пытается соединиться вновь (увеличивая время экcпоненциально). При восстановлении соединения
-    загрузка продолжается.
+    Connects with PostgresDB, reads data by chunks and updates time of load of non-empty chunk in external status
+    file (status_file.txt). Upon next run the function loads available chunk for records with modification time
+    later that saved status time. In case of lost connection, @backoff intercepts conn err and attempts to
+    reconnect (increasing time between attempts exponentially). Upon conn restore, the extract process continues.
 
-    :param dsn: словарь с настройками соединения с PostgresDB
-    :param chunk_size: размер пачки для выгрузки данных из Postgres
-    :return:
+    :param dsn: dictionary with setting for conn with PostgresDB
+    :param used_table: basic Postgres table from which data is extracted
+    :return: tuple with chunks of data from Postgres
     """
+
+    current_table = used_table
+
     with psycopg2.connect(**dsn) as conn, conn.cursor() as cursor:
-        current_table = "film_work"
 
-        status_time = current_state.get_state("status_time")
+        if current_table == settings.INDEX_NAME:
+            status_time = current_state.get_state("status_time_filmwork")
+            cursor.execute('''
+                        SELECT
+                           fw.id,
+                           fw.title,
+                           fw.description,
+                           fw.rating,
+                           fw.modified,
+                           COALESCE (
+                               json_agg(
+                                   DISTINCT jsonb_build_object(
+                                       'person_role', pfw.role,
+                                       'id', p.id,
+                                       'name', p.full_name
+                                   )
+                               ) FILTER (WHERE p.id is not null),
+                               '[]'
+                           ) as persons,
+                           array_agg(DISTINCT g.name) as genres
+                        FROM content.film_work fw
+                        LEFT JOIN content.person_film_work pfw ON pfw.film_work_id = fw.id
+                        LEFT JOIN content.person p ON p.id = pfw.person_id
+                        LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
+                        LEFT JOIN content.genre g ON g.id = gfw.genre_id
+                        WHERE fw.modified >= (%s)
+                        GROUP BY fw.id
+                        ORDER BY fw.modified
+                        LIMIT 50;
+                        ''', (status_time,))
 
-        cursor.execute('''
-                    SELECT
-                       fw.id,
-                       fw.title,
-                       fw.description,
-                       fw.rating,
-                       COALESCE (
-                           json_agg(
-                               DISTINCT jsonb_build_object(
-                                   'person_role', pfw.role,
-                                   'id', p.id,
-                                   'name', p.full_name
-                               )
-                           ) FILTER (WHERE p.id is not null),
-                           '[]'
-                       ) as persons,
-                       array_agg(DISTINCT g.name) as genres
-                    FROM content.film_work fw
-                    LEFT JOIN content.person_film_work pfw ON pfw.film_work_id = fw.id
-                    LEFT JOIN content.person p ON p.id = pfw.person_id
-                    LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
-                    LEFT JOIN content.genre g ON g.id = gfw.genre_id
-                    WHERE fw.modified > (%s)
-                    GROUP BY fw.id
-                    ORDER BY fw.modified
-                    LIMIT 100;
-                    ''', (status_time,))
+            current_chunk = cursor.fetchall()
+            current_status_time = current_chunk[-1][4]
+            pprint(str(current_status_time))
+            current_state.set_state("status_time_filmwork", str(current_status_time))
+            if current_chunk == ():
+                current_state.set_state("status_time_filmwork", str(datetime.now()))
+                return None
+            else:
+                return current_chunk
 
-        current_chunk = cursor.fetchall()
-        if current_chunk == ():
-            current_state.set_state("status_time", str(datetime.now()))
-            return None
-        else:
+        elif current_table == settings.INDEX_NAME_GENRE:
+
+            cursor.execute('''
+                        SELECT g.id, g.name, g.description
+                        FROM genre as g
+                        WHERE id in (SELECT DISTINCT genre_id FROM genre_film_work) 
+                        ''')
+
+            current_chunk = cursor.fetchall()
             return current_chunk
 
 
-def transform_data(chunk: dict):
+def transform_data(chunk: dict, table: str):
     """
-    Функция трансформирует данные, полученные из Postgres, в соответствии с описанием индекса для
-    Elasticsearch (es_schema.py).
-    :param chunk:
-    :param index_name:
-    :return:
+    Transfroms data in accordance with Elasticsearch index description (es_schema.py).
+    :param chunk: tuple with chunk of data from Postgres
+    :param table: basic Postgres table from which data is extracted
+    :return: generator which returns docs in Elasticsearch format
     """
-    records = chunk
-    for record in records:
-        persons_dict = process_persons(record[4])
-        doc = {
-            "_index": index_name,
-            "_id": record[0],
-            "_source": {
-                "id": record[0],
-                "title": record[1],
-                "description": record[2],
-                "imdb_rating": record[3],
-                "actors": persons_dict["actors"],
-                "director": str(persons_dict.get("directors")),
-                "writers": persons_dict["writers"],
-                "genre": record[5],
+
+    current_table = table
+
+    if current_table == settings.INDEX_NAME:
+
+        def process_persons(persons_data):
+            """
+            Transforms persons data in accordance with Elasticsearch index description (es_schema.py).
+            """
+            persons_dict = {}
+            roles = ("actor", "director", "writer")
+            for role in roles:
+                role_dict = [{"id": item["id"], "name": item["name"]} for item in persons_data if
+                             item["person_role"] == role]
+                persons_dict[f'{role}s'] = role_dict
+            return persons_dict
+
+        for record in chunk:
+            persons_dict = process_persons(record[5])
+            doc = {
+                "_index": current_table,
+                "_id": record[0],
+                "_source": {
+                    "id": record[0],
+                    "title": record[1],
+                    "description": record[2],
+                    "imdb_rating": record[3],
+                    "actors": persons_dict["actors"],
+                    "director": str(persons_dict.get("directors")),
+                    "writers": persons_dict["writers"],
+                    "genre": record[6],
+                }
             }
-        }
-        yield doc
+            yield doc
 
+    elif current_table == settings.INDEX_NAME_GENRE:
 
-def process_persons(persons_data):
-    """
-    Функция трансформирует данные по persons в соответствии с описанием индекса для Elasticsearch (es_schema.py).
-    """
-    persons_dict = {}
-    roles = ("actor", "director", "writer")
-    for role in roles:
-        role_dict = [{"id": item["id"], "name": item["name"]} for item in persons_data if item["person_role"] == role]
-        persons_dict[f'{role}s'] = role_dict
-    return persons_dict
+        for record in chunk:
+            doc = {
+                "_index": current_table,
+                "_id": record[0],
+                "_source": {
+                    "id": record[0],
+                    "name": record[1],
+                    "description": record[2],
+                }
+            }
+            yield doc
 
 
 @backoff.on_exception(backoff.expo, requests.exceptions.ConnectionError, max_time=60, max_tries=8,
                       on_backoff=backoff_hdlr)
-def create_es_index(data_scheme):
+def create_es_index(data_scheme: dict):
     """
-    Функция загружает описание индекса из файла es_schema.py и на ее основе создает индекс в Elasticsearch.
-    В случае потери связи с Elasticsearch декоратор backoff перехватывает ошибку соединения и пытается соединиться вновь
-    (увеличивая время экcпоненциально). При восстановлении соединения создание индекса продолжается. Если индекс уже
-    существует, то новый не сохдается и не перезаписывается. Также, функция создает файл state_file и записывает в него
-    стартовое время по умолчанию, которое должно быть меньше, чем время модификации любой записи в Postgres. Если
-    файл существует, то он остается как есть.
-    :param data_scheme:
-    :return:
+    Loads index description from es_schema.py and creates Elasticsearch index.
+    In case of lost connection, @backoff intercepts conn err and attempts to reconnect
+    (increasing time between attempts exponentially). Upon conn restore, the extract process continues.
+    :param data_scheme: Elasticsearch index description
+    :return: None
     """
 
-    url = f'http://{settings.ES_HOST}:{settings.ES_PORT}/movies'
+    url = f'http://{settings.ES_HOST}:{settings.ES_PORT}/film_work'
     payload = json.dumps(data_scheme)
     headers = {'Content-Type': 'application/json'}
     requests.put(url, headers=headers, data=payload)
 
-    if current_state.get_state("status_time"):
-        return None
-    else:
-        current_state.set_state("status_time", settings.STARTING_TIME)
+
+def create_es_index_genres(data_scheme):
+    """
+    Loads index description from es_schema.py and creates Elasticsearch index.
+    In case of lost connection, @backoff intercepts conn err and attempts to reconnect
+    (increasing time between attempts exponentially). Upon conn restore, the extract process continues.
+    :param data_scheme: Elasticsearch index description
+    :return: None
+    """
+
+    url = f'http://{settings.ES_HOST}:{settings.ES_PORT}/genres'
+    payload = json.dumps(data_scheme)
+    headers = {'Content-Type': 'application/json'}
+    requests.put(url, headers=headers, data=payload)
 
 
 @backoff.on_exception(backoff.expo, ConnectionError, max_time=60, max_tries=8, on_backoff=backoff_hdlr)
 def load_data_to_es(doc):
     """
-    Функция осуществляет соединение с Elasticsearch, загружает документы из пачки в Elasticsearch. В случае потери
-    связи с Elasticsearch декоратор backoff перехватывает ошибку соединения и пытается соединиться вновь
-    (увеличивая время экcпоненциально). При восстановлении соединения загрузка продолжается.
-    :param doc: генератор документов для загрузки в Elasticsearch
-    :return:
+    Cooonects with Elasticsearch, loads documents from a chunck to Elasticsearch.
+    In case of lost connection, @backoff intercepts conn err and attempts to reconnect
+    (increasing time between attempts exponentially). Upon conn restore, the extract process continues.
+    :param doc: generator which returns docs in Elasticsearch format
+    :return: None
     """
     es_client = Elasticsearch(f"http://{settings.ES_HOST}:{settings.ES_PORT}")
     helpers.bulk(es_client, doc)
@@ -159,12 +198,22 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     state_storage = JsonFileStorage(settings.STATE_STORAGE_FILE)
     current_state = State(state_storage)
-    index_name = settings.INDEX_NAME
+
+    if not current_state.get_state("status_time_filmwork"):
+        current_state.set_state("status_time_filmwork", settings.STARTING_TIME)
+    if not current_state.get_state("status_time_genres"):
+        current_state.set_state("status_time_genres", settings.STARTING_TIME)
+
     create_es_index(es_schema)
+    create_es_index_genres(es_schema_genres)
+    tables = (settings.INDEX_NAME, settings.INDEX_NAME_GENRE)
 
     while True:
-        movies_data = extract_from_pg(dsn_settings, settings.LOAD_SIZE)
-        data_for_es = transform_data(movies_data)
-        load_data_to_es(data_for_es)
+        for table in tables:
+
+            records_data = extract_from_pg(dsn_settings, table)
+            data_for_es = transform_data(records_data, table)
+            load_data_to_es(data_for_es)
+
         time.sleep(settings.ETL_SLEEP_TIME)
 

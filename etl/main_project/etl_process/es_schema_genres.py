@@ -1,4 +1,4 @@
-es_schema = {
+es_schema_genres = {
   "settings": {
     "refresh_interval": "1s",
     "analysis": {
@@ -45,13 +45,7 @@ es_schema = {
       "id": {
         "type": "keyword"
       },
-      "imdb_rating": {
-        "type": "float"
-      },
-      "genre": {
-        "type": "keyword"
-      },
-      "title": {
+      "name": {
         "type": "text",
         "analyzer": "ru_en",
         "fields": {
@@ -64,44 +58,10 @@ es_schema = {
         "type": "text",
         "analyzer": "ru_en"
       },
-      "director": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
-      "actors_names": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
-      "writers_names": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
-      "actors": {
-        "type": "nested",
-        "dynamic": "strict",
-        "properties": {
-          "id": {
-            "type": "keyword"
-          },
-          "name": {
-            "type": "text",
-            "analyzer": "ru_en"
-          }
-        }
-      },
-      "writers": {
-        "type": "nested",
-        "dynamic": "strict",
-        "properties": {
-          "id": {
-            "type": "keyword"
-          },
-          "name": {
-            "type": "text",
-            "analyzer": "ru_en"
-          }
-        }
-      }
     }
   }
 }
+
+
+# WHERE fw.modified > (%s)
+# , (status_time,)

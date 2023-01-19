@@ -1,9 +1,10 @@
 **Проект MOVIES_ADMIN**
 
-В директории main_project размещена наиболее актуальная версия проекта movies_admin (по результатам спринтов 1, 2) и
+В директории main_project размещена наиболее актуальная версия проекта movies_admin (по результатам спринтов 1, 2),
 скрипт ETL(Extract-Transform-Load) процесса (спринт 3), который выгружает данные пачками напрямую из PostgresDB, трансформирует в
 соответствии с описанием индекса Elasticsearch (es_schema.py), и загружает в Elasticsearch. При потере связи с 
-PostgresDB и/или Elasticsearch выполняет backoff, а после восстановления соединения продолжает работу.
+PostgresDB и/или Elasticsearch выполняет backoff, а после восстановления соединения продолжает работу. 
+По результатам спринта 4 добавлен ETL по жанрам, подняты сервисы FastAPI и redis.  
 
 Проект movies_admin - это приложение на Django (по стандарту WSGI).
 Приложение хранит и предоставляет информацию о фильмах из своей базы данных.
@@ -19,17 +20,18 @@ HTTP-сервер и обратный прокси-сервер - Nginx.
 
 1. Настроить переменные окружения в файле .env (пример - см. файл env.example).
 2. В терминале из директории main_project выполнить команду "docker-compose up -d --build".
-3. Команда создаст образы и запустит приложение с шестью Docker-контейнерами:
+3. Команда создаст образы и запустит приложение с восемью Docker-контейнерами:
 - Django (на порту 8000 внутри Docker приложения, закрыт для доступа извне)
 - Postgres (на порту 5432 внутри Docker приложения, закрыт для доступа извне)
 - Nginx (на порту 80:80)
 - Elasticsearch (на порту 9200:9200 )
 - ETL (без портов)
 - Kibana (5601:5601) - для удобства работы с данными Elasticsearch.
-4. После запуска контейнера ETL (main_project_etl_1) для переноса данных из Postgres в Elasticsearch 
-в CLI контейнера нужно выполнить команду "python3 etl_process.py". К сожалению, автоматический регулярный запуск
-скрипта etl_process.py c помощью cron пока не настроен. Чтобы загрузить все данные в Elasticsearch заново, нужно
-удалить файл status_file.txt.
+- redis (6379:6379)
+- FastAPI (8001:8001)
+
+4. После запуска контейнера ETL (main_project_etl_1) начинается цикличный процесс переноса данных из 
+Postgres в Elasticsearch Чтобы перезагрузить все данные в Elasticsearch, нужно удалить файл status_file.txt.
 
 Для удобного управления контейнерами можно установить Docker Desktop
 
@@ -49,8 +51,8 @@ HTTP-сервер и обратный прокси-сервер - Nginx.
 
 (3) Elasticsearch:
 
-- описание индекса movies: http://localhost:9200/movies/
-- информация по всем фильмам: http://localhost:9200/movies/_search?pretty=true&size=50
+- описание индекса movies: http://localhost:9200/film_work/
+- информация по всем фильмам: http://localhost:9200/film_work/_search?pretty=true&size=50
 
 Файл Postman для тестирования Elasticsearch - 
 https://code.s3.yandex.net/middle-python/learning-materials/ETLTests-2.json
