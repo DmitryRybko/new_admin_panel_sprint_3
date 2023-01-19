@@ -31,7 +31,7 @@ HTTP-сервер и обратный прокси-сервер - Nginx.
 - FastAPI (8001:8001)
 
 4. После запуска контейнера ETL (main_project_etl_1) начинается цикличный процесс переноса данных из 
-Postgres в Elasticsearch Чтобы перезагрузить все данные в Elasticsearch, нужно удалить файл status_file.txt.
+Postgres в Elasticsearch. Чтобы перезагрузить все данные в Elasticsearch, нужно удалить файл status_file.txt.
 
 Для удобного управления контейнерами можно установить Docker Desktop
 
