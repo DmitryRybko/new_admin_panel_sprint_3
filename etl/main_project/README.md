@@ -6,6 +6,9 @@
 PostgresDB и/или Elasticsearch выполняет backoff, а после восстановления соединения продолжает работу. 
 По результатам спринта 4 добавлен ETL по жанрам, подняты сервисы FastAPI и redis.  
 
+Для того, чтобы весь сервис поднимался, необходимо разместить в одну папку директории из двух репозиториев:
+этот и Async_API_sprint_1.
+
 Проект movies_admin - это приложение на Django (по стандарту WSGI).
 Приложение хранит и предоставляет информацию о фильмах из своей базы данных.
 
@@ -51,8 +54,10 @@ Postgres в Elasticsearch. Чтобы перезагрузить все данн
 
 (3) Elasticsearch:
 
-- описание индекса movies: http://localhost:9200/film_work/
-- информация по всем фильмам: http://localhost:9200/film_work/_search?pretty=true&size=50
+- описание индекса film_work: http://localhost:9200/film_work/
+- информация по всем фильмам: http://localhost:9200/film_work/_search?pretty=true&size=50- описание индекса movies: http://localhost:9200/film_work/
+- описание индекса generes: http://localhost:9200/genres/
+- информация по всем жанрам: http://localhost:9200/genres/_search?pretty=true&size=50
 
 Файл Postman для тестирования Elasticsearch - 
 https://code.s3.yandex.net/middle-python/learning-materials/ETLTests-2.json
