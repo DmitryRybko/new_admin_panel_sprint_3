@@ -11,7 +11,6 @@ from es_schema_genres import es_schema_genres
 from datetime import datetime
 from settings import settings, dsn_settings
 from state_processing import JsonFileStorage, State
-from pprint import pprint
 
 
 def backoff_hdlr(details: dict):
@@ -71,7 +70,6 @@ def extract_from_pg(dsn: dict, used_table: str):
 
             current_chunk = cursor.fetchall()
             current_status_time = current_chunk[-1][4]
-            pprint(str(current_status_time))
             current_state.set_state("status_time_filmwork", str(current_status_time))
             if current_chunk == ():
                 current_state.set_state("status_time_filmwork", str(datetime.now()))
@@ -127,8 +125,11 @@ def transform_data(chunk: dict, table: str):
                     "imdb_rating": record[3],
                     "actors": persons_dict["actors"],
                     "director": str(persons_dict.get("directors")),
+                    "actors_names": "",
+                    "writers_names": "",
                     "writers": persons_dict["writers"],
                     "genre": record[6],
+
                 }
             }
             yield doc
