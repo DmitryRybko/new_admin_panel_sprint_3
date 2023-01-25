@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     INDEX_NAME: str = "film_work"
     INDEX_NAME_GENRE: str = "genres"
+    INDEX_NAME_PERSONS: str = "persons"
 
     STARTING_TIME: str = "2000-06-16 23:14:09.200 +0300"
 

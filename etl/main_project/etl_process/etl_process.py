@@ -8,6 +8,7 @@ from elasticsearch import Elasticsearch, helpers
 from elasticsearch.exceptions import ConnectionError
 from es_schema import es_schema
 from es_schema_genres import es_schema_genres
+from es_schema_persons import es_schema_persons
 from datetime import datetime
 from settings import settings, dsn_settings
 from state_processing import JsonFileStorage, State
@@ -88,6 +89,17 @@ def extract_from_pg(dsn: dict, used_table: str):
             current_chunk = cursor.fetchall()
             return current_chunk
 
+        elif current_table == settings.INDEX_NAME_PERSONS:
+
+            cursor.execute('''SELECT p.id, p.full_name, p.modified, ARRAY_AGG(DISTINCT person_film_work.role) AS role 
+                            FROM content.person as p 
+                            LEFT OUTER JOIN content.person_film_work 
+                            ON content.person_film_work.person_id = p.id 
+                            GROUP BY p.id;''')
+
+            current_chunk = cursor.fetchall()
+            return current_chunk
+
 
 def transform_data(chunk: dict, table: str):
     """
@@ -148,6 +160,19 @@ def transform_data(chunk: dict, table: str):
             }
             yield doc
 
+    elif current_table == settings.INDEX_NAME_PERSONS:
+
+        for record in chunk:
+            doc = {
+                "_index": current_table,
+                "_id": record[0],
+                "_source": {
+                    "id": record[0],
+                    "full_name": record[1],
+                    "roles": record[2],
+                }
+            }
+            yield doc
 
 @backoff.on_exception(backoff.expo, requests.exceptions.ConnectionError, max_time=60, max_tries=8,
                       on_backoff=backoff_hdlr)
@@ -180,6 +205,20 @@ def create_es_index_genres(data_scheme):
     headers = {'Content-Type': 'application/json'}
     requests.put(url, headers=headers, data=payload)
 
+def create_es_index_persons(data_scheme: dict):
+    """
+    Loads index description from es_schema.py and creates Elasticsearch index.
+    In case of lost connection, @backoff intercepts conn err and attempts to reconnect
+    (increasing time between attempts exponentially). Upon conn restore, the extract process continues.
+    :param data_scheme: Elasticsearch index description
+    :return: None
+    """
+
+    url = f'http://{settings.ES_HOST}:{settings.ES_PORT}/persons'
+    payload = json.dumps(data_scheme)
+    headers = {'Content-Type': 'application/json'}
+    requests.put(url, headers=headers, data=payload)
+
 
 @backoff.on_exception(backoff.expo, ConnectionError, max_time=60, max_tries=8, on_backoff=backoff_hdlr)
 def load_data_to_es(doc):
@@ -204,10 +243,13 @@ if __name__ == '__main__':
         current_state.set_state("status_time_filmwork", settings.STARTING_TIME)
     if not current_state.get_state("status_time_genres"):
         current_state.set_state("status_time_genres", settings.STARTING_TIME)
+    if not current_state.get_state("status_time_persons"):
+        current_state.set_state("status_time_persons", settings.STARTING_TIME)
 
     create_es_index(es_schema)
     create_es_index_genres(es_schema_genres)
-    tables = (settings.INDEX_NAME, settings.INDEX_NAME_GENRE)
+    create_es_index_persons(es_schema_persons)
+    tables = (settings.INDEX_NAME, settings.INDEX_NAME_GENRE, settings.INDEX_NAME_PERSONS)
 
     while True:
         for table in tables:
