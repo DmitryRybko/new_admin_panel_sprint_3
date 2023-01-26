@@ -47,7 +47,11 @@ es_schema_persons = {
       },
       "full_name": {
         "type": "text",
-        "analyzer": "ru_en"
+        "analyzer": "ru_en",
+        "fields": {
+          "raw": {
+            "type": "keyword"}
+        }
       },
       "roles": {
         "type": "keyword"
