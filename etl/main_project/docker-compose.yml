@@ -35,7 +35,7 @@ services:
 
   # Elasticsearch Docker Images: https://www.docker.elastic.co/
   elasticsearch:
-    image: elasticsearch:7.7.0
+    image: elasticsearch:8.6.0
     container_name: elasticsearch
     environment:
       - xpack.security.enabled=false
