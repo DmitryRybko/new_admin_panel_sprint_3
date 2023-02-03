@@ -191,7 +191,7 @@ def create_es_index(data_scheme: dict):
     requests.put(url, headers=headers, data=payload)
 
 
-def create_es_index_genres(data_scheme):
+def create_es_index_genres(data_scheme: dict):
     """
     Loads index description from es_schema.py and creates Elasticsearch index.
     In case of lost connection, @backoff intercepts conn err and attempts to reconnect

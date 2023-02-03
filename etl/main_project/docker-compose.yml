@@ -3,7 +3,7 @@ services:
   service:
     build: movies_admin
     expose:
-      - "8000"
+      - "8001"
     volumes:
       - static_data:/opt/app/data/
     env_file:
