@@ -52,6 +52,9 @@ es_schema_persons = {
       "roles": {
         "type": "keyword"
       },
+      "film_ids": {
+        "type": "keyword"
+      },
     }
   }
 }
