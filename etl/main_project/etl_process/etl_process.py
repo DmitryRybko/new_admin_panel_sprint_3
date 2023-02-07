@@ -4,14 +4,15 @@ import requests
 import time
 import json
 import logging
-from elasticsearch import Elasticsearch, helpers
-from elasticsearch.exceptions import ConnectionError
+from elasticsearch7 import Elasticsearch, helpers
+from elasticsearch7.exceptions import ConnectionError
 from es_schema import es_schema
 from es_schema_genres import es_schema_genres
 from es_schema_persons import es_schema_persons
 from datetime import datetime
 from settings import settings, dsn_settings
 from state_processing import JsonFileStorage, State
+from etl_sql import select_film_works, select_genres, select_persons
 
 
 def backoff_hdlr(details: dict):
@@ -40,34 +41,7 @@ def extract_from_pg(dsn: dict, used_table: str):
 
         if current_table == settings.INDEX_NAME:
             status_time = current_state.get_state("status_time_filmwork")
-            cursor.execute('''
-                        SELECT
-                           fw.id,
-                           fw.title,
-                           fw.description,
-                           fw.rating,
-                           fw.modified,
-                           COALESCE (
-                               json_agg(
-                                   DISTINCT jsonb_build_object(
-                                       'person_role', pfw.role,
-                                       'id', p.id,
-                                       'name', p.full_name
-                                   )
-                               ) FILTER (WHERE p.id is not null),
-                               '[]'
-                           ) as persons,
-                           array_agg(DISTINCT g.name) as genres
-                        FROM content.film_work fw
-                        LEFT JOIN content.person_film_work pfw ON pfw.film_work_id = fw.id
-                        LEFT JOIN content.person p ON p.id = pfw.person_id
-                        LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
-                        LEFT JOIN content.genre g ON g.id = gfw.genre_id
-                        WHERE fw.modified >= (%s)
-                        GROUP BY fw.id
-                        ORDER BY fw.modified
-                        LIMIT 50;
-                        ''', (status_time,))
+            cursor.execute(select_film_works, (status_time,))
 
             current_chunk = cursor.fetchall()
             current_status_time = current_chunk[-1][4]
@@ -80,22 +54,14 @@ def extract_from_pg(dsn: dict, used_table: str):
 
         elif current_table == settings.INDEX_NAME_GENRE:
 
-            cursor.execute('''
-                        SELECT g.id, g.name, g.description
-                        FROM genre as g
-                        WHERE id in (SELECT DISTINCT genre_id FROM genre_film_work) 
-                        ''')
+            cursor.execute(select_genres)
 
             current_chunk = cursor.fetchall()
             return current_chunk
 
         elif current_table == settings.INDEX_NAME_PERSONS:
 
-            cursor.execute('''SELECT p.id, p.full_name, p.modified, ARRAY_AGG(DISTINCT person_film_work.role) AS role 
-                            FROM content.person as p 
-                            LEFT OUTER JOIN content.person_film_work 
-                            ON content.person_film_work.person_id = p.id 
-                            GROUP BY p.id;''')
+            cursor.execute(select_persons)
 
             current_chunk = cursor.fetchall()
             return current_chunk
@@ -169,7 +135,8 @@ def transform_data(chunk: dict, table: str):
                 "_source": {
                     "id": record[0],
                     "full_name": record[1],
-                    "roles": record[2],
+                    "roles": record[3],
+                    "film_ids": record[4]
                 }
             }
             yield doc
