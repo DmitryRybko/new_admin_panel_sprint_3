@@ -28,4 +28,4 @@ COPY . .
 
 EXPOSE 8000
 
-ENTRYPOINT ["/opt/app/entrypoint.sh"]
+ENTRYPOINT ["bash", "/opt/app/entrypoint.sh"]
